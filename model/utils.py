@@ -129,6 +129,7 @@ def get_tokenizer(dataset_name, tokenizer: str = "pinyin"):
     tokenizer   - "pinyin" do g2p for only chinese characters, need .txt vocab_file
                 - "char" for char-wise tokenizer, need .txt vocab_file
                 - "byte" for utf-8 tokenizer
+                - "custom" if you're directly passing in a path to the vocab.txt you want to use
     vocab_size  - if use "pinyin", all available pinyin types, common alphabets (also those with accent) and symbols
                 - if use "char", derived from unfiltered character & symbol counts of custom dataset
                 - if use "byte", set to 256 (unicode byte range) 
@@ -144,6 +145,12 @@ def get_tokenizer(dataset_name, tokenizer: str = "pinyin"):
     elif tokenizer == "byte":
         vocab_char_map = None
         vocab_size = 256
+    elif tokenizer == "custom":
+        with open (dataset_name, "r", encoding="utf-8") as f:
+            vocab_char_map = {}
+            for i, char in enumerate(f):
+                vocab_char_map[char[:-1]] = i
+        vocab_size = len(vocab_char_map)
 
     return vocab_char_map, vocab_size
 
@@ -275,6 +282,8 @@ def get_inference_prompt(
             ref_audio = resampler(ref_audio)
 
         # Text
+        if len(prompt_text[-1].encode('utf-8')) == 1:
+            prompt_text = prompt_text + " "
         text = [prompt_text + gt_text]
         if tokenizer == "pinyin":
             text_list = convert_char_to_pinyin(text, polyphone = polyphone)
@@ -294,8 +303,8 @@ def get_inference_prompt(
             # ref_audio = gt_audio
         else:
             zh_pause_punc = r"。，、；：？！"
-            ref_text_len = len(prompt_text) + len(re.findall(zh_pause_punc, prompt_text))
-            gen_text_len = len(gt_text) + len(re.findall(zh_pause_punc, gt_text))
+            ref_text_len = len(prompt_text.encode('utf-8')) + 3 * len(re.findall(zh_pause_punc, prompt_text))
+            gen_text_len = len(gt_text.encode('utf-8')) + 3 * len(re.findall(zh_pause_punc, gt_text))
             total_mel_len = ref_mel_len + int(ref_mel_len / ref_text_len * gen_text_len / speed)
 
         # to mel spectrogram
