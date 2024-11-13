@@ -26,7 +26,7 @@ $Env:HF_ENDPOINT = "https://hf-mirror.com"
 $Env:XFORMERS_FORCE_DISABLE_TRITON = "1"
 
 # run tagger
-accelerate launch --num_cpu_threads_per_process=8 "gradio_app.py" `
+accelerate launch --num_cpu_threads_per_process=8 "src/f5_tts/infer/infer_gradio.py" `
   --share
 
 Write-Output "Tagger finished"

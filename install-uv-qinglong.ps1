@@ -7,7 +7,7 @@ $Env:PIP_NO_CACHE_DIR = 1
 $Env:PIP_INDEX_URL = "https://pypi.mirrors.ustc.edu.cn/simple"
 $Env:UV_INDEX_URL = "https://pypi.tuna.tsinghua.edu.cn/simple/"
 $Env:UV_EXTRA_INDEX_URL = "https://download.pytorch.org/whl/cu124"
-$Env:UV_CACHE_DIR="${env:LOCALAPPDATA}\uv\cache"
+$Env:UV_CACHE_DIR="${env:LOCALAPPDATA}/uv/cache"
 $Env:UV_NO_CACHE=0
 $Env:UV_LINK_MODE="symlink"
 function InstallFail {

@@ -17,15 +17,39 @@ fi
 set -u
 
 APP_NAME="uv"
-APP_VERSION="0.4.21"
-ARTIFACT_DOWNLOAD_URL="${INSTALLER_DOWNLOAD_URL:-https://github.com/astral-sh/uv/releases/download/0.4.21}"
+APP_VERSION="0.5.1"
+# Look for GitHub Enterprise-style base URL first
+if [ -n "${UV_INSTALLER_GHE_BASE_URL:-}" ]; then
+    INSTALLER_BASE_URL="$UV_INSTALLER_GHE_BASE_URL"
+else
+    INSTALLER_BASE_URL="${UV_INSTALLER_GITHUB_BASE_URL:-https://mirror.ghproxy.com/https://github.com}"
+fi
+if [ -n "${INSTALLER_DOWNLOAD_URL:-}" ]; then
+    ARTIFACT_DOWNLOAD_URL="$INSTALLER_DOWNLOAD_URL"
+else
+    ARTIFACT_DOWNLOAD_URL="${INSTALLER_BASE_URL}/astral-sh/uv/releases/download/0.5.1"
+fi
 PRINT_VERBOSE=${INSTALLER_PRINT_VERBOSE:-0}
 PRINT_QUIET=${INSTALLER_PRINT_QUIET:-0}
-NO_MODIFY_PATH=${INSTALLER_NO_MODIFY_PATH:-0}
+if [ -n "${UV_NO_MODIFY_PATH:-}" ]; then
+    NO_MODIFY_PATH="$UV_NO_MODIFY_PATH"
+else
+    NO_MODIFY_PATH=${INSTALLER_NO_MODIFY_PATH:-0}
+fi
+if [ "${UV_DISABLE_UPDATE:-0}" = "1" ]; then
+    INSTALL_UPDATER=0
+else
+    INSTALL_UPDATER=1
+fi
+UNMANAGED_INSTALL="${UV_UNMANAGED_INSTALL:-}"
+if [ -n "${UNMANAGED_INSTALL}" ]; then
+    NO_MODIFY_PATH=1
+    INSTALL_UPDATER=0
+fi
+
 read -r RECEIPT <<EORECEIPT
-{"binaries":["CARGO_DIST_BINS"],"binary_aliases":{},"cdylibs":["CARGO_DIST_DYLIBS"],"cstaticlibs":["CARGO_DIST_STATICLIBS"],"install_prefix":"AXO_INSTALL_PREFIX","provider":{"source":"cargo-dist","version":"0.22.1"},"source":{"app_name":"uv","name":"uv","owner":"astral-sh","release_type":"github"},"version":"0.4.21"}
+{"binaries":["CARGO_DIST_BINS"],"binary_aliases":{},"cdylibs":["CARGO_DIST_DYLIBS"],"cstaticlibs":["CARGO_DIST_STATICLIBS"],"install_layout":"unspecified","install_prefix":"AXO_INSTALL_PREFIX","modify_path":true,"provider":{"source":"cargo-dist","version":"0.25.2-prerelease.3"},"source":{"app_name":"uv","name":"uv","owner":"astral-sh","release_type":"github"},"version":"0.5.1"}
 EORECEIPT
-# Are we happy with this same path on Linux and Mac?
 RECEIPT_HOME="${HOME}/.config/uv"
 
 usage() {
@@ -33,13 +57,15 @@ usage() {
     cat <<EOF
 uv-installer.sh
 
-The installer for uv 0.4.21
+The installer for uv 0.5.1
 
 This script detects what platform you're on and fetches an appropriate archive from
-https://github.com/astral-sh/uv/releases/download/0.4.21
-then unpacks the binaries and installs them to
+https://github.com/astral-sh/uv/releases/download/0.5.1
+then unpacks the binaries and installs them to the first of the following locations
 
-    \$CARGO_HOME/bin (or \$HOME/.cargo/bin)
+    \$XDG_BIN_HOME
+    \$XDG_DATA_HOME/../bin
+    \$HOME/.local/bin
 
 It will then add that dir to PATH by adding the appropriate line to your shell profiles.
 
@@ -85,6 +111,7 @@ download_binary_and_run_installer() {
                 PRINT_VERBOSE=1
                 ;;
             --no-modify-path)
+                say "--no-modify-path has been deprecated; please set UV_NO_MODIFY_PATH=1 in the environment"
                 NO_MODIFY_PATH=1
                 ;;
             *)
@@ -122,15 +149,17 @@ download_binary_and_run_installer() {
     assert_nz "$_true_arch" "arch"
     local _cur_arch="$_true_arch"
 
-    # Lookup what archives support this platform
+
+    # look up what archives support this platform
     local _artifact_name
     _artifact_name="$(select_archive_for_arch "$_true_arch")" || return 1
     local _bins
     local _zip_ext
     local _arch
+    local _checksum_style
+    local _checksum_value
 
-    # try each archive, checking runtime conditions like libc versions
-    # accepting the first one that matches, as it's the best match
+    # destructure selected archive info into locals
     case "$_artifact_name" in 
         "uv-aarch64-apple-darwin.tar.gz")
             _arch="aarch64-apple-darwin"
@@ -355,8 +384,14 @@ download_binary_and_run_installer() {
       exit 1
     fi
 
+    if [ -n "${_checksum_style:-}" ]; then
+        verify_checksum "$_file" "$_checksum_style" "$_checksum_value"
+    else
+        say "no checksums to verify"
+    fi
+
     # ...and then the updater, if it exists
-    if [ -n "$_updater_name" ]; then
+    if [ -n "$_updater_name" ] && [ "$INSTALL_UPDATER" = "1" ]; then
         local _updater_url="$ARTIFACT_DOWNLOAD_URL/$_updater_name"
         # This renames the artifact while doing the download, removing the
         # target triple and leaving just the appname-update format
@@ -397,12 +432,17 @@ download_binary_and_run_installer() {
     ignore rm -rf "$_dir"
 
     # Install the install receipt
-    mkdir -p "$RECEIPT_HOME" || {
-        err "unable to create receipt directory at $RECEIPT_HOME"
-    }
-    echo "$RECEIPT" > "$RECEIPT_HOME/$APP_NAME-receipt.json"
-    # shellcheck disable=SC2320
-    local _retval=$?
+    if [ "$INSTALL_UPDATER" = "1" ]; then
+        if ! mkdir -p "$RECEIPT_HOME"; then
+            err "unable to create receipt directory at $RECEIPT_HOME"
+        else
+            echo "$RECEIPT" > "$RECEIPT_HOME/$APP_NAME-receipt.json"
+            # shellcheck disable=SC2320
+            local _retval=$?
+        fi
+    else
+        local _retval=0
+    fi
 
     return "$_retval"
 }
@@ -663,6 +703,9 @@ aliases_for_binary() {
 select_archive_for_arch() {
     local _true_arch="$1"
     local _archive
+
+    # try each archive, checking runtime conditions like libc versions
+    # accepting the first one that matches, as it's the best match
     case "$_true_arch" in 
         "aarch64-apple-darwin")
             _archive="uv-aarch64-apple-darwin.tar.gz"
@@ -975,51 +1018,101 @@ install() {
     local _env_script_path_expr
     # Forces the install to occur at this path, not the default
     local _force_install_dir
+    # Which install layout to use - "flat" or "hierarchical"
+    local _install_layout="unspecified"
 
     # Check the newer app-specific variable before falling back
     # to the older generic one
     if [ -n "${UV_INSTALL_DIR:-}" ]; then
         _force_install_dir="$UV_INSTALL_DIR"
+        _install_layout="flat"
     elif [ -n "${CARGO_DIST_FORCE_INSTALL_DIR:-}" ]; then
         _force_install_dir="$CARGO_DIST_FORCE_INSTALL_DIR"
+        _install_layout="flat"
+    elif [ -n "$UNMANAGED_INSTALL" ]; then
+        _force_install_dir="$UNMANAGED_INSTALL"
+        _install_layout="flat"
     fi
+
+    # Check if the install layout should be changed from `flat` to `cargo-home`
+    # for backwards compatible updates of applications that switched layouts.
+    if [ -n "${_force_install_dir:-}" ]; then
+        if [ "$_install_layout" = "flat" ]; then
+            # If the install directory is targeting the Cargo home directory, then
+            # we assume this application was previously installed that layout
+            if [ "$_force_install_dir" = "${CARGO_HOME:-${HOME:-}/.cargo}" ]; then
+                _install_layout="cargo-home"
+            fi
+        fi
+     fi
 
     # Before actually consulting the configured install strategy, see
     # if we're overriding it.
     if [ -n "${_force_install_dir:-}" ]; then
-        _install_dir="$_force_install_dir/bin"
-        _lib_install_dir="$_force_install_dir/bin"
-        _receipt_install_dir="$_force_install_dir"
-        _env_script_path="$_force_install_dir/env"
-        _install_dir_expr="$(replace_home "$_force_install_dir/bin")"
-        _env_script_path_expr="$(replace_home "$_force_install_dir/env")"
+        case "$_install_layout" in
+            "hierarchical")
+                _install_dir="$_force_install_dir/bin"
+                _lib_install_dir="$_force_install_dir/lib"
+                _receipt_install_dir="$_force_install_dir"
+                _env_script_path="$_force_install_dir/env"
+                _install_dir_expr="$(replace_home "$_force_install_dir/bin")"
+                _env_script_path_expr="$(replace_home "$_force_install_dir/env")"
+                ;;
+            "cargo-home")
+                _install_dir="$_force_install_dir/bin"
+                _lib_install_dir="$_force_install_dir/bin"
+                _receipt_install_dir="$_force_install_dir"
+                _env_script_path="$_force_install_dir/env"
+                _install_dir_expr="$(replace_home "$_force_install_dir/bin")"
+                _env_script_path_expr="$(replace_home "$_force_install_dir/env")"
+                ;;
+            "flat")
+                _install_dir="$_force_install_dir"
+                _lib_install_dir="$_force_install_dir"
+                _receipt_install_dir="$_install_dir"
+                _env_script_path="$_force_install_dir/env"
+                _install_dir_expr="$(replace_home "$_force_install_dir")"
+                _env_script_path_expr="$(replace_home "$_force_install_dir/env")"
+                ;;
+            *)
+                err "Unrecognized install layout: $_install_layout"
+                ;;
+        esac
     fi
     if [ -z "${_install_dir:-}" ]; then
-        # first try $CARGO_HOME, then fallback to $HOME/.cargo
-        if [ -n "${CARGO_HOME:-}" ]; then
-            _receipt_install_dir="$CARGO_HOME"
-            _install_dir="$CARGO_HOME/bin"
-            _lib_install_dir="$CARGO_HOME/bin"
-            _env_script_path="$CARGO_HOME/env"
-            # Initially make this early-bound to erase the potentially-temporary env-var
-            _install_dir_expr="$_install_dir"
-            _env_script_path_expr="$_env_script_path"
-            # If CARGO_HOME was set but it ended up being the default $HOME-based path,
-            # then keep things late-bound. Otherwise bake the value for safety.
-            # This is what rustup does, and accurately reproducing it is useful.
-            if [ -n "${HOME:-}" ]; then
-                if [ "$HOME/.cargo/bin" = "$_install_dir" ]; then
-                    _install_dir_expr='$HOME/.cargo/bin'
-                    _env_script_path_expr='$HOME/.cargo/env'
-                fi
-            fi
-        elif [ -n "${HOME:-}" ]; then
-            _receipt_install_dir="$HOME/.cargo"
-            _install_dir="$HOME/.cargo/bin"
-            _lib_install_dir="$HOME/.cargo/bin"
-            _env_script_path="$HOME/.cargo/env"
-            _install_dir_expr='$HOME/.cargo/bin'
-            _env_script_path_expr='$HOME/.cargo/env'
+        _install_layout="flat"
+        # Install to $XDG_BIN_HOME
+        if [ -n "${XDG_BIN_HOME:-}" ]; then
+            _install_dir="$XDG_BIN_HOME"
+            _lib_install_dir="$_install_dir"
+            _receipt_install_dir="$_install_dir"
+            _env_script_path="$XDG_BIN_HOME/env"
+            _install_dir_expr="$(replace_home "$_install_dir")"
+            _env_script_path_expr="$(replace_home "$_env_script_path")"
+        fi
+    fi
+    if [ -z "${_install_dir:-}" ]; then
+        _install_layout="flat"
+        # Install to $XDG_DATA_HOME/../bin
+        if [ -n "${XDG_DATA_HOME:-}" ]; then
+            _install_dir="$XDG_DATA_HOME/../bin"
+            _lib_install_dir="$_install_dir"
+            _receipt_install_dir="$_install_dir"
+            _env_script_path="$XDG_DATA_HOME/../bin/env"
+            _install_dir_expr="$(replace_home "$_install_dir")"
+            _env_script_path_expr="$(replace_home "$_env_script_path")"
+        fi
+    fi
+    if [ -z "${_install_dir:-}" ]; then
+        _install_layout="flat"
+        # Install to $HOME/.local/bin
+        if [ -n "${HOME:-}" ]; then
+            _install_dir="$HOME/.local/bin"
+            _lib_install_dir="$HOME/.local/bin"
+            _receipt_install_dir="$_install_dir"
+            _env_script_path="$HOME/.local/bin/env"
+            _install_dir_expr='$HOME/.local/bin'
+            _env_script_path_expr='$HOME/.local/bin/env'
         fi
     fi
 
@@ -1037,6 +1130,11 @@ install() {
     RECEIPT=$(echo "$RECEIPT" | sed "s,AXO_INSTALL_PREFIX,$_receipt_install_dir,")
     # Also replace the aliases with the arch-specific one
     RECEIPT=$(echo "$RECEIPT" | sed "s'\"binary_aliases\":{}'\"binary_aliases\":$(json_binary_aliases "$_arch")'")
+    # And replace the install layout
+    RECEIPT=$(echo "$RECEIPT" | sed "s'\"install_layout\":\"unspecified\"'\"install_layout\":\"$_install_layout\"'")
+    if [ "$NO_MODIFY_PATH" = "1" ]; then
+        RECEIPT=$(echo "$RECEIPT" | sed "s'\"modify_path\":true'\"modify_path\":false'")
+    fi
 
     say "installing to $_install_dir"
     ensure mkdir -p "$_install_dir"
@@ -1644,6 +1742,83 @@ downloader() {
     elif [ "$_dld" = wget ]
     then wget "$1" -O "$2"
     else err "Unknown downloader"   # should not reach here
+    fi
+}
+
+verify_checksum() {
+    local _file="$1"
+    local _checksum_style="$2"
+    local _checksum_value="$3"
+    local _calculated_checksum
+
+    if [ -z "$_checksum_value" ]; then
+        return 0
+    fi
+    case "$_checksum_style" in
+        sha256)
+            if ! check_cmd sha256sum; then
+                say "skipping sha256 checksum verification (it requires the 'sha256sum' command)"
+                return 0
+            fi
+            _calculated_checksum="$(sha256sum -b "$_file" | awk '{printf $1}')"
+            ;;
+        sha512)
+            if ! check_cmd sha512sum; then
+                say "skipping sha512 checksum verification (it requires the 'sha512sum' command)"
+                return 0
+            fi
+            _calculated_checksum="$(sha512sum -b "$_file" | awk '{printf $1}')"
+            ;;
+        sha3-256)
+            if ! check_cmd openssl; then
+                say "skipping sha3-256 checksum verification (it requires the 'openssl' command)"
+                return 0
+            fi
+            _calculated_checksum="$(openssl dgst -sha3-256 "$_file" | awk '{printf $NF}')"
+            ;;
+        sha3-512)
+            if ! check_cmd openssl; then
+                say "skipping sha3-512 checksum verification (it requires the 'openssl' command)"
+                return 0
+            fi
+            _calculated_checksum="$(openssl dgst -sha3-512 "$_file" | awk '{printf $NF}')"
+            ;;
+        blake2s)
+            if ! check_cmd b2sum; then
+                say "skipping blake2s checksum verification (it requires the 'b2sum' command)"
+                return 0
+            fi
+            # Test if we have official b2sum with blake2s support
+            local _well_known_blake2s_checksum="93314a61f470985a40f8da62df10ba0546dc5216e1d45847bf1dbaa42a0e97af"
+            local _test_blake2s
+            _test_blake2s="$(printf "can do blake2s" | b2sum -a blake2s | awk '{printf $1}')" || _test_blake2s=""
+
+            if [ "X$_test_blake2s" = "X$_well_known_blake2s_checksum" ]; then
+                _calculated_checksum="$(b2sum -a blake2s "$_file" | awk '{printf $1}')" || _calculated_checksum=""
+            else
+                say "skipping blake2s checksum verification (installed b2sum doesn't support blake2s)"
+                return 0
+            fi
+            ;;
+        blake2b)
+            if ! check_cmd b2sum; then
+                say "skipping blake2b checksum verification (it requires the 'b2sum' command)"
+                return 0
+            fi
+            _calculated_checksum="$(b2sum "$_file" | awk '{printf $1}')"
+            ;;
+        false)
+            ;;
+        *)
+            say "skipping unknown checksum style: $_checksum_style"
+            return 0
+            ;;
+    esac
+
+    if [ "$_calculated_checksum" != "$_checksum_value" ]; then
+        err "checksum mismatch
+            want: $_checksum_value
+            got:  $_calculated_checksum"
     fi
 }
 
