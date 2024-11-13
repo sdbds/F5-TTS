@@ -16,27 +16,129 @@
 
 ### Thanks to all the contributors !
 
+## News
+- **2024/10/08**: F5-TTS & E2 TTS base models on [🤗 Hugging Face](https://huggingface.co/SWivid/F5-TTS), [🤖 Model Scope](https://www.modelscope.cn/models/SWivid/F5-TTS_Emilia-ZH-EN), [🟣 Wisemodel](https://wisemodel.cn/models/SJTU_X-LANCE/F5-TTS_Emilia-ZH-EN).
+
 ## Installation
 
 powershell run with `install-with-uv(nocache).ps1`
 
 **[Optional]**: We provide [Dockerfile](https://github.com/SWivid/F5-TTS/blob/main/Dockerfile) and you can use the following command to build it.
 ```bash
-docker build -t f5tts:v1 .
+# Create a python 3.10 conda env (you could also use virtualenv)
+conda create -n f5-tts python=3.10
+conda activate f5-tts
+
+# Install pytorch with your CUDA version, e.g.
+pip install torch==2.3.0+cu118 torchaudio==2.3.0+cu118 --extra-index-url https://download.pytorch.org/whl/cu118
 ```
 
-### Development
+Then you can choose from a few options below:
 
-When making a pull request, please use pre-commit to ensure code quality:
+### 1. As a pip package (if just for inference)
+
+```bash
+pip install git+https://github.com/SWivid/F5-TTS.git
+```
+
+### 2. Local editable (if also do training, finetuning)
+
+```bash
+git clone https://github.com/SWivid/F5-TTS.git
+cd F5-TTS
+# git submodule update --init --recursive  # (optional, if need bigvgan)
+pip install -e .
+```
+If initialize submodule, you should add the following code at the beginning of `src/third_party/BigVGAN/bigvgan.py`.
+```python
+import os
+import sys
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+```
+
+### 3. Docker usage
+```bash
+# Build from Dockerfile
+docker build -t f5tts:v1 .
+
+# Or pull from GitHub Container Registry
+docker pull ghcr.io/swivid/f5-tts:main
+```
+
+
+## Inference
+
+### 1. Gradio App
+
+Currently supported features:
+
+- Basic TTS with Chunk Inference
+- Multi-Style / Multi-Speaker Generation
+- Voice Chat powered by Qwen2.5-3B-Instruct
+- [Custom model](src/f5_tts/infer/SHARED.md) inference (local only)
+
+```bash
+# Launch a Gradio app (web interface)
+f5-tts_infer-gradio
+
+# Specify the port/host
+f5-tts_infer-gradio --port 7860 --host 0.0.0.0
+
+# Launch a share link
+f5-tts_infer-gradio --share
+```
+
+### 2. CLI Inference
+
+```bash
+# Run with flags
+# Leave --ref_text "" will have ASR model transcribe (extra GPU memory usage)
+f5-tts_infer-cli \
+--model "F5-TTS" \
+--ref_audio "ref_audio.wav" \
+--ref_text "The content, subtitle or transcription of reference audio." \
+--gen_text "Some text you want TTS model generate for you."
+
+# Run with default setting. src/f5_tts/infer/examples/basic/basic.toml
+f5-tts_infer-cli
+# Or with your own .toml file
+f5-tts_infer-cli -c custom.toml
+
+# Multi voice. See src/f5_tts/infer/README.md
+f5-tts_infer-cli -c src/f5_tts/infer/examples/multi/story.toml
+```
+
+### 3. More instructions
+
+- In order to have better generation results, take a moment to read [detailed guidance](src/f5_tts/infer).
+- The [Issues](https://github.com/SWivid/F5-TTS/issues?q=is%3Aissue) are very useful, please try to find the solution by properly searching the keywords of problem encountered. If no answer found, then feel free to open an issue.
+
+
+## Training
+
+### 1. Gradio App
+
+Read [training & finetuning guidance](src/f5_tts/train) for more instructions.
+
+```bash
+# Quick start with Gradio web interface
+f5-tts_finetune-gradio
+```
+
+
+## [Evaluation](src/f5_tts/eval)
+
+
+## Development
+
+Use pre-commit to ensure code quality (will run linters and formatters automatically)
 
 ```bash
 pip install pre-commit
 pre-commit install
 ```
 
-This will run linters and formatters automatically before each commit.
-
-Manually run using: 
+When making a pull request, before each commit, run: 
 
 ```bash
 pre-commit run --all-files
