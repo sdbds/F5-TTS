@@ -28,6 +28,7 @@ model:
     ff_mult: 2
     text_dim: 512
     conv_layers: 4
+    checkpoint_activations: False  # recompute activations and save memory for extra compute
   mel_spec:
     target_sample_rate: 24000
     n_mel_channels: 100
@@ -43,4 +44,4 @@ ckpts:
   logger: wandb  # wandb | tensorboard | None
   save_per_updates: 50000  # save checkpoint per steps
   last_per_steps: 5000  # save last checkpoint per steps
-  save_dir: ckpts/${model.name}_${model.mel_spec.mel_spec_type}_${model.tokenizer}_${datasets.name}/${now:%Y-%m-%d}/${now:%H-%M-%S}
+  save_dir: ckpts/${model.name}_${model.mel_spec.mel_spec_type}_${model.tokenizer}_${datasets.name}
