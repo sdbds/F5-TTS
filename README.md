@@ -6,7 +6,8 @@
 [![hfspace](https://img.shields.io/badge/🤗-Space%20demo-yellow)](https://huggingface.co/spaces/mrfakename/E2-F5-TTS)
 [![msspace](https://img.shields.io/badge/🤖-Space%20demo-blue)](https://modelscope.cn/studios/modelscope/E2-F5-TTS)
 [![lab](https://img.shields.io/badge/X--LANCE-Lab-grey?labelColor=lightgrey)](https://x-lance.sjtu.edu.cn/)
-<img src="https://github.com/user-attachments/assets/12d7749c-071a-427c-81bf-b87b91def670" alt="Watermark" style="width: 40px; height: auto">
+[![lab](https://img.shields.io/badge/Peng%20Cheng-Lab-grey?labelColor=lightgrey)](https://www.pcl.ac.cn)
+<!-- <img src="https://github.com/user-attachments/assets/12d7749c-071a-427c-81bf-b87b91def670" alt="Watermark" style="width: 40px; height: auto"> -->
 
 **F5-TTS**: Diffusion Transformer with ConvNeXt V2, faster trained and inference.
 
@@ -29,8 +30,15 @@ powershell run with `install-with-uv(nocache).ps1`
 conda create -n f5-tts python=3.10
 conda activate f5-tts
 
-# Install pytorch with your CUDA version, e.g.
+# NVIDIA GPU: install pytorch with your CUDA version, e.g.
 pip install torch==2.3.0+cu118 torchaudio==2.3.0+cu118 --extra-index-url https://download.pytorch.org/whl/cu118
+
+# AMD GPU: install pytorch with your ROCm version, e.g. (Linux only)
+pip install torch==2.5.1+rocm6.2 torchaudio==2.5.1+rocm6.2 --extra-index-url https://download.pytorch.org/whl/rocm6.2
+
+# Intel GPU: install pytorch with your XPU version, e.g.
+# Intel® Deep Learning Essentials or Intel® oneAPI Base Toolkit must be installed
+pip install --pre torch torchaudio --index-url https://download.pytorch.org/whl/nightly/xpu
 ```
 
 Then you can choose from a few options below:
@@ -81,6 +89,33 @@ f5-tts_infer-gradio --port 7860 --host 0.0.0.0
 # Launch a share link
 f5-tts_infer-gradio --share
 ```
+
+<details>
+<summary>NVIDIA device docker compose file example</summary>
+
+``` yaml
+services:
+  f5-tts:
+    image: ghcr.io/swivid/f5-tts:main
+    ports:
+      - "7860:7860"
+    environment:
+      GRADIO_SERVER_PORT: 7860
+    entrypoint: ["f5-tts_infer-gradio", "--port", "7860", "--host", "0.0.0.0"]
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+volumes:
+  f5-tts:
+    driver: local
+```
+
+</details>
 
 ### 2. CLI Inference
 
